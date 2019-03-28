@@ -36,7 +36,7 @@ else:
 while True:
 
     # Capture packets from network
-    pkt=s.recvfrom(65565)
+    pkt=s.recvfrom(12345)
 
     # extract packets with the help of pye.unpack class 
     unpack=pye.unpack()
