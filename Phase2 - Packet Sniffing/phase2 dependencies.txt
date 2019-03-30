@@ -1,0 +1,9 @@
+tce-load -wi python
+tce-load -wi pip
+tce-load -wi libpcap
+tce-load -wi compiletc
+tce-load -wi python-dev
+tce-load -wi libpcap-dev
+
+sudo pip install pcapy
+sudo pip install impacket
