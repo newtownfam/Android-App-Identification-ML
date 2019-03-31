@@ -4,17 +4,31 @@ import datetime
 import pcapy
 import sys
 
+# obj to hold a connection
+class Connection:
+    def __init__(self, srcAddr, destAddr, srcPort, destPort, bytesTr, bytesRecv, pktSent, pktRecv, startTime, timeout, protocol):
+        self.srcAddr = srcAddr
+        self.destAddr = destAddr
+        self.srcPort = srcPort
+        self.destPort = destPort
+        self.bytesTr = bytesTr
+        self.bytesRecv = bytesRecv
+        self.pktSent = pktSent
+        self.pktRecv = pktRecv
+        self.startTime = startTime
+        self.timeout = timeout
+        self.protocol = protocol
+
+# global list to hold connections
+Connections = []
+
 def main():
         #list all devices
         devices = pcapy.findalldevs()
+        print "available devices are: "
         print devices
-
-        #show available devices
-        print "Available devices are :"
-        for d in devices :
-                print d
-
-        print "Sniffing packets from android box via eth1"
+        print "\n"
+        print "sniffing packets from android box via eth1..."
 
         '''
         open device
@@ -28,9 +42,22 @@ def main():
 
         #start sniffing packets
         while(1) :
+                for i in Connections:
+                                delta = datetime.datetime.now() - i.timeout
+                                if (int(delta.total_seconds()) >= 1):
+                                        print "Flow completed with: \n"
+                                        print "Timestamp: " + str(i.startTime)
+                                        print "Source Address:  " + i.srcAddr + ", " + "Destination Address: " + i.destAddr
+                                        print "Source Port: " + i.srcPort + ", " + "Destination Port: " + i.destPort + ", " + "Protocol : " + i.protocol
+                                        print "Packets Sent: " + str(i.pktSent) + ", " + "Packets Received: " + str(i.pktRecv) + ", " + "Bytes Sent: " + str(i.bytesTr) + ", " + "Bytes Received: " + str(i.bytesRecv)
+                                        print "Timeout Time: %i seconds" %(int(delta.total_seconds()))
+                                        print "\n"
+                                        Connections.remove(i)
+                                        #print "length of array : %d" %(len(Connections))
+
                 (header, packet) = cap.next()
-                #print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
-                parse_packet(packet)
+                parse_packet(header, packet)
+                
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
 def eth_addr (a) :
@@ -38,8 +65,9 @@ def eth_addr (a) :
         return b
 
 #function to parse a packet
-def parse_packet(packet) :
+def parse_packet(header, packet) :
 
+        connection = None
         #parse ethernet header
         eth_length = 14
 
@@ -60,22 +88,19 @@ def parse_packet(packet) :
                 version_ihl = iph[0]
                 version = version_ihl >> 4
                 ihl = version_ihl & 0xF
-
                 iph_length = ihl * 4
-
                 ttl = iph[5]
                 protocol = iph[6]
                 s_addr = socket.inet_ntoa(iph[8]);
                 d_addr = socket.inet_ntoa(iph[9]);
 
-                print 'Source Address: ' + str(s_addr) + ' ' + 'Destination Address: ' + str(d_addr)
                 
                 #TCP protocol
                 if protocol == 6 :
                         t = iph_length + eth_length
                         tcp_header = packet[t:t+20]
 
-                        #now unpack them :)
+                        #now unpack them
                         tcph = unpack('!HHLLBBHHH' , tcp_header)
 
                         source_port = tcph[0]
@@ -83,13 +108,14 @@ def parse_packet(packet) :
                         sequence = tcph[2]
                         acknowledgement = tcph[3]
                         doff_reserved = tcph[4]
-                        tcph_length = doff_reserved >> 4
+                        length = doff_reserved >> 4
 
-                        print 'Source Port: ' + str(source_port) + ' ' + 'Dest Port: ' + str(dest_port) + ' ' + 'Protocol: TCP'
+                        '''
                         h_size = eth_length + iph_length + tcph_length * 4
                         data_size = len(packet) - h_size
-                        
-                        print 'Data Size: ' + str(data_size)
+                        '''
+
+                        connection = Connection(str(s_addr), str(d_addr), str(source_port), str(dest_port), header.getlen(), 0, 1, 0, datetime.datetime.now(), datetime.datetime.now(), "TCP")             
 
 
                 #UDP packets
@@ -98,7 +124,7 @@ def parse_packet(packet) :
                         udph_length = 8
                         udp_header = packet[u:u+8]
 
-                        #now unpack them :)
+                        #now unpack them
                         udph = unpack('!HHHH' , udp_header)
 
                         source_port = udph[0]
@@ -106,13 +132,40 @@ def parse_packet(packet) :
                         length = udph[2]
                         checksum = udph[3]
 
-                        #print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Length : ' + str(length) + ' Checksum : ' + str(checksum)
-                        print 'Source Port : ' + str(source_port) + ' ' + 'Dest Port : ' + str(dest_port) + ' ' + 'Protocol : UDP'
+                        connection = Connection(str(s_addr), str(d_addr), str(source_port), str(dest_port), header.getlen(), 0, 1, 0, datetime.datetime.now(), datetime.datetime.now(), "UDP")
 
-                        h_size = eth_length + iph_length + udph_length
-                        data_size = len(packet) - h_size
+                                      
+                # append to connections array
+                if connection is not None:
+                        match = 0
+                        if len(Connections) == 0:
+                                if "192.168.12" in connection.srcAddr: 
+                                        Connections.append(connection)
+                                        match = 1
+                        else:
+                                for i in Connections:
+                                        if "192.168.12" not in connection.srcAddr:
+                                                # recv
+                                                if (i.destAddr == connection.srcAddr) and (i.destPort == connection.srcPort) and (i.protocol == connection.protocol):
+                                                        #update connection
+                                                        i.bytesRecv += length
+                                                        i.timeout = datetime.datetime.now()
+                                                        i.pktRecv += 1
+                                                        match = 1
+                
+                                        elif "192.168.12" in connection.srcAddr:
+                                                # transmitting
+                                                if (i.destAddr == connection.destAddr) and (i.destPort == connection.destPort) and (i.protocol == connection.protocol):
+                                                        #update connection
+                                                        i.bytesTr += length
+                                                        i.timeout = datetime.datetime.now()
+                                                        i.pktSent += 1
+                                                        match = 1
+                                                       
+                        if match == 0:
+                                if "192.168.12" in connection.srcAddr: 
+                                        Connections.append(connection)           
 
-                        print 'Data Size: ' + str(data_size)
 
 main()
 
